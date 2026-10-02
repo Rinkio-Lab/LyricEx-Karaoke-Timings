@@ -34,6 +34,24 @@ _av.open = _patched_open
 from faster_whisper import WhisperModel  # noqa: E402
 
 
+def serialize_segments(segments):
+    """faster-whisper segment 对象 → 可 JSON 序列化的 dict 列表。"""
+    result = []
+    for seg in segments:
+        words = [
+            {'word': w.word, 'start': w.start, 'end': w.end}
+            for w in (seg.words or [])
+        ]
+        result.append({
+            'id': seg.id,
+            'start': seg.start,
+            'end': seg.end,
+            'text': seg.text.strip(),
+            'words': words,
+        })
+    return result
+
+
 def main():
     if len(sys.argv) not in (3, 4):
         sys.exit('usage: wk-transcribe <audio.mp3> <out.json> [model=small]')
@@ -53,19 +71,7 @@ def main():
         beam_size=5,
     )
 
-    result = []
-    for seg in segments:
-        words = [
-            {'word': w.word, 'start': w.start, 'end': w.end}
-            for w in (seg.words or [])
-        ]
-        result.append({
-            'id': seg.id,
-            'start': seg.start,
-            'end': seg.end,
-            'text': seg.text.strip(),
-            'words': words,
-        })
+    result = serialize_segments(segments)
 
     with open(out, 'w', encoding='utf-8') as f:
         json.dump(
