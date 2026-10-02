@@ -1,0 +1,18 @@
+[project]
+name = "lyricex-karaoke-timings"
+version = "0.1.0"
+description = "LyricEx 专用工具：whisper 词级转写 + 官方歌词对齐，生成卡拉OK逐字时间轴 JSON"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["faster-whisper"]
+
+[project.scripts]
+wk-transcribe = "lyricex_karaoke_timings.transcribe:main"
+wk-align = "lyricex_karaoke_timings.align:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
