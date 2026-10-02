@@ -72,72 +72,21 @@ Not lazy about: understanding the problem (read it fully and trace the real flow
 1. 修改文件列表 2. 每个文件的关键改动 3. 注释地图（每条注释解释了哪个「为什么」）4. 行为不变说明 5. 格式化 / lint / 测试结果 6. 剩余风险与后续建议 7. 自检（行为不变 / 风格一致 / 注释关键 / 命名清晰 / 无过度设计 / 无无关依赖）8. **文档同步说明**（本次改动涉及的版本/功能/接口是否已同步 CHANGELOG.md、changelog.js、README、FORMAT.md、docs/ 等相应位置；未同步必须说明原因）。
 
 
-## 项目特有规则（LyricEx 专属，AI 必须遵守）
+## 项目特有规则（LyricEx Karaoke Timings 专属）
 
-### 1. Service Worker 缓存名（sw.js）——每次改动后必须 bump
-- 项目有 PWA Service Worker（`sw.js`），对静态资源走 **cache-first**（`return hit || network`）。
-- **只要改动了任何会被浏览器缓存的文件（index.html、css、js、locales、字体），就必须同步把 `sw.js` 里的 `CACHE` 常量 bump 一个新值**（如 `lyricex-v2.2.0` → `lyricex-v2.2.1`）。
-- 不 bump 的后果：用户浏览器永远拿到旧资源（这正是"前端没 2.2.0 更新日志/主题没变化/CSS 缓存不死"等历史 bug 的根因）。bump 后用户刷新两次即可（第一次装新 SW 清旧缓存，第二次拉新资源）。
-- 上传 GitHub 前核对：当前 `CACHE` 名 ≥ changelog 最新版本号。
+### 1. 项目形态
+- Python 3.14 + uv 管理；包名 `lyricex-karaoke-timings`，源码在 `src/lyricex_karaoke_timings/`。
+- 两个 CLI（`pyproject.toml [project.scripts]`）：`wk-transcribe`（faster-whisper 词级转写）、`wk-align`（whisper 词 × 官方行对齐）。
+- 对齐核心逻辑在 `align.py` 的 `align_lines(official, wh_words)` / `parse_official(lyric_text)` 纯函数，`main()` 只做 IO——**改动对齐逻辑必须同步更新 `tests/test_align.py`**。
 
-### 2. i18n 语言维护与 fallback 规则
-- 语言注册表唯一来源：`assets/locales/languages.js`（`window.__lyricexLanguages`）；每个条目含 `code / native / maintainedBy / fallback`，RTL 语言可加 `rtl: true`（如 ar）。UI 语言按钮由 app.js 从该表动态生成，`assets/locales/index.js` 的 `t()` 按 fallback 链解析。
-- **code 必须是 BCP 47 全小写标签**（`pt-br`，不要 `pt-BR`）：languages.js code、字典文件名 `<code>.js`、文件内 `i18n.register('<code>')` 三者必须一字不差一致。浏览器语言检测支持完整标签 → 小写 → 逐级去尾前缀回退（pt-BR → pt-br → pt → zh）。
-- **maintainedBy: 'ai'（zh / ja / en）**：三语由 AI 维护。**每新增一个 i18n 键，必须在同一次改动中同步补齐 zh.js / ja.js / en.js 三个文件**；不得只加一个语言。
-- **maintainedBy: 'user'（用户自加的其他语言）**：AI 只允许搭骨架（复制 zh.js 的键结构、值留空），**翻译由用户自己填，AI 不得代填内容**。
-- **fallback 语义**：某语言缺键时按 `fallback` 递归回退（A→B→…），始终以 zh 为最终兜底，zh 也没有才返回键名本身。用户语言建议 fallback 到 'en'（再自然落到 zh）；循环 fallback 由 `_resolveFallback` 的 seen 保护，不会死循环。
-- **新增一种用户语言的两步，无需改 index.html**：① 在 languages.js 追加一行条目（maintainedBy:'user'，fallback 如 'en'）；② 新建 `assets/locales/<code>.js`（照 zh.js 键结构，值自填；**文件名必须等于 code**，index.html 的 locale 自动加载器会按 `assets/locales/<code>.js` 动态加载并在设置里出现语言按钮）；③ 跑 `node tests/i18n-check.mjs`（该测试会自动 import 注册表里全部语言文件，检查用户语言键对齐、fallback 链、BCP 47 检测与 RTL dir）。
-- 新键写法示例：zh `'navCinema': '影院'` / en `'navCinema': 'Cinema'` / ja `'navCinema': 'シアター'`（ja 键值用日文，不用中文）。
-- **重置设置（设置 → 重置为默认）保留 `locale` 与 `directionMode`**：语言和文本方向是用户主动选择，重置时不得删除 `lyricex-locale` 存储键或把它们归回默认（app.js `resetSettings` 实现）。设置页语言区下方的 `langNotReset` 提示与此一致。
+### 2. 输出契约（与主项目 LyricEx 强关联）
+- `words.json` 行 schema：`{ lineIndex, time, text, words:[{text,start,end}] }`，时间为秒、3 位小数。
+- 结构注入 LyricEx v2 包 `lyrics.json` 每行 `words` 字段驱动卡拉OK逐字高亮；**契约变更需同步主项目 `E:\Projects\LyricEx\FORMAT.md`**。
+- 转写依赖 faster-whisper 与 av≥14（`transcribe.py` 内置 metadata_errors shim），改动后至少跑一次真实转写冒烟。
 
-### 3. 测试与验证入口
-- 全量自检：`cd E:\Projects\LyricEx; node tests/run-tests.mjs` —— 它是**真聚合器**：先跑自身 lib 断言，再以子进程依次执行全部兄弟套件 `tests/i18n-check.mjs`（三语键完整 + 全注册语言键对齐（自动 import 所有语言文件）+ fallback 链（虚构 xx/yy 模拟，不污染真实字典）+ BCP 47 检测 + RTL dir + 方向覆盖 + 静态 id）、`tests/boot-smoke.mjs`（app 启动冒烟；其中 "manifest invalid" stderr 是预期日志）、`tests/lang-switch.mjs`（语言切换回归）、`tests/utils-test.mjs`；**任一套件失败则整体 FAIL**。改动后至少跑相关套件，全部通过才算完成。
-- 本地联调：`python -m http.server 8090 --directory "E:\Projects\LyricEx"`（项目不依赖 file:// 运行，歌曲库/Service Worker 均需 HTTP）。
+### 3. 验证入口
+- 对齐自检：`cd "E:\Projects\LyricEx Karaoke Timings"; uv run python tests/test_align.py`（stdlib 纯 assert，无框架；覆盖主路径 / 弱匹配兜底回归 / 元数据过滤）。
 
-### 4. 文档维护（积极维护文档，AI 必须遵守）
-
-文档与代码同源：每次改动（新功能、修复、重构、接口变更）都必须同步维护受影响文档，不允许「代码改了文档还是旧的」。发布前逐文件审计一遍。
-
-#### 4.1 CHANGELOG.md 规范（唯一事实源之一）
-- `# Changelog` 标题必须位于文件**顶部**（曾出现标题在文件中部）。
-- 版本头统一格式：`## vX.Y.Z（YYYY-MM-DD · 主题词）`；**未发布的版本用 `（待发布 · 主题词）`**。禁止半角括号 `(2026-10-06)`、禁止 `日期不详`。
-- 分节固定为 `### Added / Fixed / Changed / Removed / Test / Notes` 这一顺序；**禁止自造小节**（如 工程化（本次）/ A11y / 基础设施——A11y 类条目按性质归入 Added 或 Fixed）。每个版本至少一个分节，条目保持 `**标题**：内容` 或短句即可。
-- 日期唯一权威 = `assets/scripts/changelog.js` 的日期时间线；CHANGELOG.md 与 changelog.js **不得互相矛盾**（曾出现 2.1.0 的日期比 2.2.0 还晚）。历史回填日期一律以 changelog.js 为准。
-- **不得漏版本**：每个 bump 过的版本必须有记录（曾整个漏掉 v2.8.1）。补记录时按时间线插在正确位置。
-
-#### 4.2 changelog.js（应用内更新日志）同步规则
-- schema 固定：`{ version, date, changes: [{ type, text }] }`，`type ∈ added | changed | fixed | test | removed | breaking`，条目 **newest-first**。
-- 正文为开发者中文，**不 i18n**（文件头注释与 UI 标签才走三语）。
-- **每 bump 一次版本，必须在同一次改动中同步写 CHANGELOG.md 与 changelog.js 同一批条目**（同一事实、两个载体，防止只更新一个）。
-- 版本序号必须连续：2.5.0 → 2.6.0 → … → 2.8.x 缺一不可；同版本条目不得重复（曾出现两条 version 相同的 2.3.2，其中一条实为 2.3.3 内容——按真实内容归位版本号）。
-
-#### 4.3 每次改动后的文档联动清单
-- 新增/变更 i18n 键：zh.js / ja.js / en.js 三语补齐（见第 2 节），键名变更同步改 index.html 静态文案与文档示例。
-- 新增面向用户的功能（制包、导入格式、导出、设置项）：在 `CHANGELOG.md` + `changelog.js` 记条目；有明确使用方法（如网易云 JSON 获取）时在 `docs/` 写指南并挂进帮助页。
-- 包格式 / 加载契约变更：同步 `FORMAT.md`。
-- README 三语（`README.md` / `README.zh-CN.md` / `README.ja.md`）：功能清单、截图、命令、流程图的改动三语同步；截图由 `scripts/readme-shots.mjs` 重新生成。
-- 工程规范变更（工具链、CI、发布流程）：同步 AGENTS.md / README 开发小节 / 流程图（`assets/images/shots/release-flow-en/zh/ja.png`，由 `scripts/render-release-flow.mjs` 三语重渲染）。
-
-#### 4.4 发布前文档审计
-- 每个版本发布前把 README 三语、FORMAT.md、docs/ 下全部指南、CHANGELOG.md、changelog.js、package.json 全查一遍：过期描述、缺版本记录、格式不统一、日期矛盾、漏掉的待办。
-- 发现乱格式当场统一，不留给下个版本；文档整理本身也是一条 changelog 记录（type 用 `changed` 或 `fixed`）。
-- 帮助页 / 指南里的「待办」项一旦完成，立即删除对应待办并更新状态（曾出现指南里写着「后续版本计划支持 klyric/yrc」而功能已实现的过期状态）。
-
-#### 4.5 可复用构造工具链（禁止用完即删）
-- **会再次用到的构造流程必须正式入库**，不得每次现写现删：流程文档 + 其工具链一起提交。例：提交/推送前流程图（`scripts/render-release-flow.mjs` 渲染 `assets/images/shots/release-flow.png`）、README 截图（`scripts/readme-shots.mjs`）、发布自检（`scripts/release-check.mjs`）、本地联调（`scripts/serve.mjs`）。
-- 命名规范 `x.x.x-someword`：脚本文件名用描述词（如 `render-release-flow.mjs`），**文件头注释标注对应引入版本**（如 `Introduced at v2.8.4`）与用法（依赖、`PLAYWRIGHT_BROWSERS_PATH`、输出路径）；文档版本头沿用 `vX.Y.Z（日期 · 主题词）`。
-- 正式脚本放 `scripts/`，**不带 `_` 前缀**（`_patch-*.mjs` 仅限一次性补丁，跑完即删、不入库）；新增正式脚本须过 lint（`eslint.config.mjs` 已覆盖 `scripts/**/*.mjs`）。
-- 改动流程步骤/截图内容时，**必须重跑对应工具链并同批提交产物**（文档与图同源，禁止只改文档）。
-
-### 5. 发布 Release（v3.1.0 起）
-
-- **commit message 一律英文**，格式沿用 v2.5.0（`5c6016a`）风格：首行 `vX.Y.Z: 一句主题`，空行后接 `- 类别: 要点` 列表（toolchain / CI / e2e / a11y / fixes / CHANGELOG…），一行一个要点，全英文；非版本改动用 `type: 主题` 前缀（如 `docs:` / `chore:` / `refactor:`）。禁止中文 commit message（曾犯并已 amend 纠正）。
-- 每个已发布版本用 `gh release create <tag> --title "vX.Y.Z" --notes-file <file>` 创建 GitHub Release（gh 已在本机安装并登录 Rinkio-Lab）。附件默认源码（GitHub 自动附带 zip / tar.gz）；需要安装包时再 `gh release upload <tag> <file>` 追加。
-- tag 与版本号锁步：`vX.Y.Z` = package.json = sw.js CACHE = CHANGELOG 头。
-- Release notes 写法（用户心法，硬规则）：
-  - 面向用户：写「你能多做什么、少烦什么」，**不写「我们改了什么」**。
-  - 结构：一句话总览 → 分组标签（新增 / 改进 / 修复 / 注意）→ 反馈入口（issues 链接）。
-  - 每条公式：标签 + 动词 + 对象 + 变化 + 好处/场景；短句、一行一件事、具体数字、前后对比（以前…现在…）；emoji 仅作视觉锚点（标题级），别每句加。
-  - 破坏性变更 / 已知问题要醒目、诚实。
-  - **双语硬规则**：notes 中英文段级交替（一中一英间隔），标题也成对（如 `## ✨ 新增 / New`）。
-  - 发布前核对版本号 / 日期 / 链接；不贴 commit log、不写「优化体验」式空话。
+### 4. 提交与发布
+- commit message 一律英文（非版本 `type: 主题`；版本 `vX.Y.Z: 主题`）。
+- 未配置 CI / 发布流程；push 前核对 `git status` 干净与 `git log origin/main..HEAD`。
