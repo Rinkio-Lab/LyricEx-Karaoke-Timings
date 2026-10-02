@@ -51,8 +51,7 @@ def parse_official(lyric_text):
 def align_lines(official, wh_words):
     """官方行 × whisper 词 → 逐行 words；拼接文本恒等于官方行文本。
 
-    返回 (result, pos, stream_len)：pos/stream_len 为字符流消费统计，
-    仅供 CLI 打印使用（与早期版本口径一致）。
+    覆盖比例由调用方从 result 推导（有 words 的行字符 / 官方总字符）。
     """
     chars = []
     for wi, w in enumerate(wh_words):
@@ -107,7 +106,7 @@ def align_lines(official, wh_words):
 
         result.append({'lineIndex': idx, 'time': round(max(0, line_time), 3), 'text': lt, 'words': words})
         pos = end_c
-    return result, pos, len(char_stream)
+    return result
 
 
 def main():
@@ -121,14 +120,17 @@ def main():
         ne = json.load(f)
     official = parse_official(ne['lrc']['lyric'])
 
-    result, pos, stream_len = align_lines(official, wh_words)
+    result = align_lines(official, wh_words)
 
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=1)
 
+    # 覆盖口径：官方行文本中被 words 覆盖的字符比例（非字符流消费比例）
     exact = sum(1 for r in result if ''.join(w['text'] for w in r['words']) == r['text'])
+    total_chars = sum(len(r['text']) for r in result)
+    covered_chars = sum(len(r['text']) for r in result if r['words'])
     print(f'lines={len(result)} words_total={sum(len(r["words"]) for r in result)} '
-          f'lines_with_exact_text={exact}/{len(result)} chars_covered={pos}/{stream_len}')
+          f'lines_with_exact_text={exact}/{len(result)} chars_covered={covered_chars}/{total_chars}')
 
 
 if __name__ == '__main__':

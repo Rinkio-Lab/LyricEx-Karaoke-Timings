@@ -52,24 +52,25 @@ wh_words_main = [
     {'word': 'ございます', 'start': 3.0, 'end': 4.0},
 ]
 official_main = [{'time': 0.0, 'text': 'こんにちは世界'}, {'time': 2.0, 'text': 'おはようございます'}]
-res_main, pos_main, stream_main = align_lines(official_main, wh_words_main)
+res_main = align_lines(official_main, wh_words_main)
 eq('align main line count', len(res_main), 2)
 ok('align main words concatenate to line text', all(''.join(w['text'] for w in r['words']) == r['text'] for r in res_main))
 eq('align main line0 time clamped to 0', res_main[0]['time'], 0.0)
 eq('align main line1 time = first word - 0.05', res_main[1]['time'], 2.45)
-eq('align main consumed whole stream', pos_main, stream_main)
+eq('align main full character cover', sum(len(r['text']) for r in res_main if r['words']), sum(len(r['text']) for r in res_main))
 
 # ---- align_lines: weak-match fallback (v0.1.0 crash regression) ----
 # first line has no match in the stream; fallback consumes it, leaving the
 # second line (which IS in the stream) with an empty span -> must not crash
 wh_words_wk = [{'word': ch, 'start': i * 0.6, 'end': (i + 1) * 0.6} for i, ch in enumerate('あいうえお')]
 official_wk = [{'time': 0.0, 'text': 'かきくけこ'}, {'time': 1.5, 'text': 'あいうえお'}]
-res_wk, _, _ = align_lines(official_wk, wh_words_wk)
+res_wk = align_lines(official_wk, wh_words_wk)
 eq('align fallback line count', len(res_wk), 2)
 ok('align fallback weak line projects onto words', ''.join(w['text'] for w in res_wk[0]['words']) == res_wk[0]['text'])
 eq('align fallback weak line time from first word', res_wk[0]['time'], 0.0)
 eq('align fallback exhausted line words empty', res_wk[1]['words'], [])
 eq('align fallback exhausted line time falls back to official', res_wk[1]['time'], 1.5)
+eq('align fallback cover only weak line', sum(len(r['text']) for r in res_wk if r['words']), 5)
 
 # ---- align_lines: partially weak match stays exact ----
 wh_words_pw = [
@@ -79,7 +80,7 @@ wh_words_pw = [
     {'word': 'さよなら', 'start': 3.2, 'end': 4.5},
 ]
 official_pw = [{'time': 0.0, 'text': 'こんにちは世界'}, {'time': 3.0, 'text': 'さようなら'}]
-res_pw, _, _ = align_lines(official_pw, wh_words_pw)
+res_pw = align_lines(official_pw, wh_words_pw)
 ok('align partial weak lines stay text-exact', all(''.join(w['text'] for w in r['words']) == r['text'] for r in res_pw))
 eq('align partial weak line2 time', res_pw[1]['time'], 3.15)
 
