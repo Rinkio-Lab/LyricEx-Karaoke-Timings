@@ -46,6 +46,12 @@ uv run wk-align whisper-lemon.json netease-lemon.json lemon-words.json
 模型：默认 `small`（日语质量/速度均衡，CPU int8 转写 4:34 歌曲约几分钟）；
 可选 `base`（更快、略粗）或 `medium`（更准、更慢）。
 
+## 自检
+
+```powershell
+uv run python tests/test_align.py   # 对齐算法单元自检（含弱匹配兜底回归）
+```
+
 ## align 算法要点
 
 1. 把 whisper 词拼成字符流（每字符记录所属词）。
@@ -66,5 +72,5 @@ uv run wk-align whisper-lemon.json netease-lemon.json lemon-words.json
 ## 已知限制
 
 - whisper 分词是音节级（如 `夢/な/ら`），卡拉OK高亮比词级更细，视觉更密。
-- 行文本与音频的字符覆盖一般 ≥80%；弱匹配行由时间窗兜底，时间仍为真实测量。
+- 行文本与音频的字符覆盖一般 ≥80%；弱匹配行按剩余字符流**等长顺序消费**兜底，时间仍为真实测量。若歌词行数多于转写出的字符流（弱匹配累积漂移），落空的后续行不带 `words`、`time` 回退到官方行时间（v0.1.0 曾在此崩溃，已修复并有回归测试）。
 - 元数据行（作词/作曲/编曲/制作）无演唱，不带 words。
