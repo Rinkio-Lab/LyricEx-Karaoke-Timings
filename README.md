@@ -69,6 +69,25 @@ uv run python tests/test_align.py   # 对齐算法单元自检（含弱匹配兜
 | `netease-raw.json` | 网易云歌词接口原始返回（`lrc.lyric` 为官方行文本） |
 | `words.json` | `[{lineIndex,time,text,words:[{text,start,end}]}]`，可直接注入 LyricEx 包 |
 
+`words.json` 样例：
+
+```json
+[
+  {
+    "lineIndex": 0,
+    "time": 0.0,
+    "text": "こんにちは世界",
+    "words": [
+      { "text": "こんにち", "start": 0.0, "end": 1.0 },
+      { "text": "は世界", "start": 1.0, "end": 2.0 }
+    ]
+  }
+]
+```
+
+字段约定：`words` 拼接文本恒等于 `text`（官方行文本）；`start`/`end` 为秒（3 位小数）；
+`time` = 首词 `start` − 0.05s（负值钳 0），保证行滚动与卡拉OK逐字高亮同步。
+
 ## 已知限制
 
 - whisper 分词是音节级（如 `夢/な/ら`），卡拉OK高亮比词级更细，视觉更密。
