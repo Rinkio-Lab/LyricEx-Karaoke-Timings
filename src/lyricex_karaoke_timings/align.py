@@ -27,6 +27,12 @@ from difflib import SequenceMatcher
 _LINE_RE = re.compile(r'\[(\d+):(\d+(?:\.\d+)?)\](.*)')
 # 元数据行无演唱；前缀覆盖冒号写法（作词 → 作词:），含简体/繁体/日文汉字
 _META_PREFIXES = ('作词', '作曲', '编曲', '制作', '作詞', '編曲')
+# 词级时间输出精度（秒）；行首提前量：首词 start - _LINE_LEAD，保证行滚动与卡拉OK逐字高亮同步
+_TIME_PRECISION = 3
+_LINE_LEAD = 0.05
+# 行匹配弱于该比例（且不足该字符数）时按等长顺序消费兜底——经验值，见 README「已知限制」
+_WEAK_MATCH_RATIO = 0.5
+_MIN_MATCH_CHARS = 3
 
 
 def norm(s):
@@ -68,7 +74,7 @@ def align_lines(official, wh_words):
         sm = SequenceMatcher(None, lt, char_stream[pos:], autojunk=False)
         block = sm.find_longest_match(0, len(lt), 0, len(char_stream) - pos)
         size = block.size
-        if size < max(3, int(len(lt) * 0.5)):
+        if size < max(_MIN_MATCH_CHARS, int(len(lt) * _WEAK_MATCH_RATIO)):
             start_c = pos
             end_c = min(pos + len(lt), len(char_stream))
         else:
@@ -80,7 +86,7 @@ def align_lines(official, wh_words):
         base = []
         for wi in range(w_lo, w_hi + 1):
             w = wh_words[wi]
-            base.append({'start': round(w['start'], 3), 'end': round(w['end'], 3)})
+            base.append({'start': round(w['start'], _TIME_PRECISION), 'end': round(w['end'], _TIME_PRECISION)})
 
         # 兜底消费把 pos 推到流尾时，后续行的 base 为空——此时不能投影，
         # 否则 cuts[-1] 在空列表上 IndexError；整首歌的输出会全部丢失。
@@ -102,9 +108,9 @@ def align_lines(official, wh_words):
                 s = e
                 if seg:
                     words.append({'text': seg, 'start': b['start'], 'end': b['end']})
-            line_time = words[0]['start'] - 0.05 if words else line['time']
+            line_time = words[0]['start'] - _LINE_LEAD if words else line['time']
 
-        result.append({'lineIndex': idx, 'time': round(max(0, line_time), 3), 'text': lt, 'words': words})
+        result.append({'lineIndex': idx, 'time': round(max(0, line_time), _TIME_PRECISION), 'text': lt, 'words': words})
         pos = end_c
     return result
 
