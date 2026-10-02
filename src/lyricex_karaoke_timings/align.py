@@ -14,6 +14,9 @@ Usage:
 
 Output lines: official lines minus metadata (作词/作曲/编曲/制作/作詞/编曲),
 each with time = first word start - 0.05s so line scrolling matches karaoke.
+
+Core logic lives in align_lines() / parse_official() (testable pure-ish
+functions); main() only does IO. Run: uv run python tests/test_align.py
 """
 import json
 import re
@@ -21,21 +24,35 @@ import sys
 
 from difflib import SequenceMatcher
 
+_LINE_RE = re.compile(r'\[(\d+):(\d+(?:\.\d+)?)\](.*)')
+_META_PREFIXES = ('作词', '作曲', '编曲', '制作', '作詞', '作曲:', '编曲:')
+
 
 def norm(s):
     return re.sub(r'\s+', '', s or '')
 
 
-def main():
-    wh_path, ne_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+def parse_official(lyric_text):
+    """lrc.lyric 文本 → [{time, text}]，跳过时间戳格式错的行与元数据行。"""
+    official = []
+    for line in lyric_text.splitlines():
+        m = _LINE_RE.match(line.strip())
+        if not m:
+            continue
+        text = norm(m.group(3))
+        if not text or text.startswith(_META_PREFIXES):
+            continue
+        secs = int(m.group(1)) * 60 + float(m.group(2))
+        official.append({'time': secs, 'text': text})
+    return official
 
-    with open(wh_path, encoding='utf-8') as f:
-        wh = json.load(f)
-    wh_words = []
-    for seg in wh['segments']:
-        for w in seg['words']:
-            wh_words.append(w)
 
+def align_lines(official, wh_words):
+    """官方行 × whisper 词 → 逐行 words；拼接文本恒等于官方行文本。
+
+    返回 (result, pos, stream_len)：pos/stream_len 为字符流消费统计，
+    仅供 CLI 打印使用（与早期版本口径一致）。
+    """
     chars = []
     for wi, w in enumerate(wh_words):
         for ch in w['word']:
@@ -43,20 +60,6 @@ def main():
                 chars.append((ch, wi))
     char_stream = ''.join(c for c, _ in chars)
     word_of_char = [wi for _, wi in chars]
-
-    with open(ne_path, encoding='utf-8') as f:
-        ne = json.load(f)
-    line_re = re.compile(r'\[(\d+):(\d+(?:\.\d+)?)\](.*)')
-    official = []
-    for line in ne['lrc']['lyric'].splitlines():
-        m = line_re.match(line.strip())
-        if not m:
-            continue
-        text = norm(m.group(3))
-        if not text or text.startswith(('作词', '作曲', '编曲', '制作', '作詞', '作曲:', '编曲:')):
-            continue
-        secs = int(m.group(1)) * 60 + float(m.group(2))
-        official.append({'time': secs, 'text': text})
 
     result = []
     pos = 0
@@ -100,15 +103,31 @@ def main():
                 if seg:
                     words.append({'text': seg, 'start': b['start'], 'end': b['end']})
             line_time = words[0]['start'] - 0.05 if words else line['time']
+
         result.append({'lineIndex': idx, 'time': round(max(0, line_time), 3), 'text': lt, 'words': words})
         pos = end_c
+    return result, pos, len(char_stream)
+
+
+def main():
+    wh_path, ne_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+    with open(wh_path, encoding='utf-8') as f:
+        wh = json.load(f)
+    wh_words = [w for seg in wh['segments'] for w in seg['words']]
+
+    with open(ne_path, encoding='utf-8') as f:
+        ne = json.load(f)
+    official = parse_official(ne['lrc']['lyric'])
+
+    result, pos, stream_len = align_lines(official, wh_words)
 
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=1)
 
     exact = sum(1 for r in result if ''.join(w['text'] for w in r['words']) == r['text'])
     print(f'lines={len(result)} words_total={sum(len(r["words"]) for r in result)} '
-          f'lines_with_exact_text={exact}/{len(result)} chars_covered={pos}/{len(char_stream)}')
+          f'lines_with_exact_text={exact}/{len(result)} chars_covered={pos}/{stream_len}')
 
 
 if __name__ == '__main__':
