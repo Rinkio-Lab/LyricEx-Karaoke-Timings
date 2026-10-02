@@ -15,6 +15,7 @@ Notes:
 """
 import json
 import sys
+from pathlib import Path
 
 # av >=14 dropped the metadata_errors kwarg that older faster-whisper passes;
 # keep av at latest (py3.14 wheel) and shim the removed kwarg.
@@ -34,8 +35,13 @@ from faster_whisper import WhisperModel  # noqa: E402
 
 
 def main():
+    if len(sys.argv) not in (3, 4):
+        sys.exit('usage: wk-transcribe <audio.mp3> <out.json> [model=small]')
     audio, out = sys.argv[1], sys.argv[2]
     model_name = sys.argv[3] if len(sys.argv) > 3 else 'small'
+
+    if not Path(audio).is_file():
+        sys.exit(f'error: no such file: {audio}')
 
     model = WhisperModel(model_name, device='cpu', compute_type='int8')
     segments, info = model.transcribe(

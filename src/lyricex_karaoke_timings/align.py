@@ -110,15 +110,35 @@ def align_lines(official, wh_words):
 
 
 def main():
+    if len(sys.argv) != 4:
+        sys.exit('usage: wk-align <whisper.json> <netease-raw.json> <out.json>')
     wh_path, ne_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    with open(wh_path, encoding='utf-8') as f:
-        wh = json.load(f)
-    wh_words = [w for seg in wh['segments'] for w in seg['words']]
+    try:
+        with open(wh_path, encoding='utf-8-sig') as f:  # utf-8-sig: tolerate BOM from manual saves
+            wh = json.load(f)
+    except OSError as e:
+        sys.exit(f'error: cannot read {wh_path}: {e}')
+    except json.JSONDecodeError as e:
+        sys.exit(f'error: {wh_path} is not valid JSON: {e}')
+    try:
+        segments = wh['segments']
+    except (KeyError, TypeError):
+        sys.exit('error: whisper.json missing "segments"')
+    wh_words = [w for seg in segments for w in seg['words']]
 
-    with open(ne_path, encoding='utf-8') as f:
-        ne = json.load(f)
-    official = parse_official(ne['lrc']['lyric'])
+    try:
+        with open(ne_path, encoding='utf-8-sig') as f:  # utf-8-sig: tolerate BOM from manual saves
+            ne = json.load(f)
+    except OSError as e:
+        sys.exit(f'error: cannot read {ne_path}: {e}')
+    except json.JSONDecodeError as e:
+        sys.exit(f'error: {ne_path} is not valid JSON: {e}')
+    try:
+        lyric = ne['lrc']['lyric']
+    except (KeyError, TypeError):
+        sys.exit('error: netease-raw.json missing "lrc.lyric"')
+    official = parse_official(lyric)
 
     result = align_lines(official, wh_words)
 
