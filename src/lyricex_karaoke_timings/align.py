@@ -79,24 +79,27 @@ def main():
             w = wh_words[wi]
             base.append({'start': round(w['start'], 3), 'end': round(w['end'], 3)})
 
-        # project official line chars onto word spans by time proportion
-        total = max(0.001, sum(b['end'] - b['start'] for b in base))
-        cum = 0.0
-        cuts = []
-        for b in base:
-            cum += (b['end'] - b['start']) / total
-            cuts.append(int(round(cum * len(lt))))
-        cuts[-1] = len(lt)
+        # 兜底消费把 pos 推到流尾时，后续行的 base 为空——此时不能投影，
+        # 否则 cuts[-1] 在空列表上 IndexError；整首歌的输出会全部丢失。
         words = []
-        s = 0
-        for j, b in enumerate(base):
-            e = cuts[j]
-            seg = lt[s:e]
-            s = e
-            if seg:
-                words.append({'text': seg, 'start': b['start'], 'end': b['end']})
-
-        line_time = words[0]['start'] - 0.05 if words else line['time']
+        line_time = line['time']
+        if base:
+            # project official line chars onto word spans by time proportion
+            total = max(0.001, sum(b['end'] - b['start'] for b in base))
+            cum = 0.0
+            cuts = []
+            for b in base:
+                cum += (b['end'] - b['start']) / total
+                cuts.append(int(round(cum * len(lt))))
+            cuts[-1] = len(lt)
+            s = 0
+            for j, b in enumerate(base):
+                e = cuts[j]
+                seg = lt[s:e]
+                s = e
+                if seg:
+                    words.append({'text': seg, 'start': b['start'], 'end': b['end']})
+            line_time = words[0]['start'] - 0.05 if words else line['time']
         result.append({'lineIndex': idx, 'time': round(max(0, line_time), 3), 'text': lt, 'words': words})
         pos = end_c
 
