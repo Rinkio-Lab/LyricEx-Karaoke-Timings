@@ -25,7 +25,8 @@ import sys
 from difflib import SequenceMatcher
 
 _LINE_RE = re.compile(r'\[(\d+):(\d+(?:\.\d+)?)\](.*)')
-_META_PREFIXES = ('作词', '作曲', '编曲', '制作', '作詞', '作曲:', '编曲:')
+# 元数据行无演唱；前缀覆盖冒号写法（作词 → 作词:），含简体/繁体/日文汉字
+_META_PREFIXES = ('作词', '作曲', '编曲', '制作', '作詞', '編曲')
 
 
 def norm(s):

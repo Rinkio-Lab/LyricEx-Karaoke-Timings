@@ -37,7 +37,7 @@ eq('norm empty', norm(''), '')
 eq('norm None', norm(None), '')
 
 # ---- parse_official ----
-LYRIC = '[00:00.00]こんにちは世界\n[00:01.00]作词: 米津玄師\n[02:30.00]おはようございます\n[bad]x\n'
+LYRIC = '[00:00.00]こんにちは世界\n[00:01.00]作词: 米津玄師\n[00:02.00]編曲: 常田大希\n[02:30.00]おはようございます\n[bad]x\n'
 official = parse_official(LYRIC)
 eq('parse_official drops malformed line', len(official), 2)
 eq('parse_official first text', official[0]['text'], 'こんにちは世界')
