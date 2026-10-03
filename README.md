@@ -39,6 +39,10 @@ uv sync          # 建 venv、装 faster-whisper（自动带 av；已内置 av>=
 # 国内拉模型走镜像（首次转写自动下载 small 模型 ~460MB）
 $env:HF_ENDPOINT = 'https://hf-mirror.com'
 
+# 0) 拉取网易云原始歌词（也可手动下载 netease-raw.json）
+uv run wk-fetch 536622304 netease-lemon.json        # 已知歌曲 ID
+uv run wk-fetch "Lemon 米津玄師" netease-lemon.json  # 按歌名搜索第一条（--pick N 可选）
+
 # 1) 转写：音频 → 词级时间戳
 uv run wk-transcribe lemon-onvocal.mp3 whisper-lemon.json small
 
