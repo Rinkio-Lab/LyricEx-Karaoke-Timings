@@ -60,17 +60,42 @@ eq('align main line1 time = first word - 0.05', res_main[1]['time'], 2.45)
 eq('align main full character cover', sum(len(r['text']) for r in res_main if r['words']), sum(len(r['text']) for r in res_main))
 
 # ---- align_lines: weak-match fallback (v0.1.0 crash regression) ----
-# first line has no match in the stream; fallback consumes it, leaving the
-# second line (which IS in the stream) with an empty span -> must not crash
+# 行1 在流中无匹配 → 回退等长消费全流；行2 靠时间窗独立恢复匹配
+# （前序弱行不再拖累后续行——时间窗对齐的核心）；行3 窗口为空 → 回退
+# 到流尾 → words=[] 且不崩溃（v0.1.0 IndexError 回归）。
 wh_words_wk = [{'word': ch, 'start': i * 0.6, 'end': (i + 1) * 0.6} for i, ch in enumerate('あいうえお')]
-official_wk = [{'time': 0.0, 'text': 'かきくけこ'}, {'time': 1.5, 'text': 'あいうえお'}]
+official_wk = [
+    {'time': 0.0, 'text': 'かきくけこ'},
+    {'time': 1.5, 'text': 'あいうえお'},
+    {'time': 5.0, 'text': 'あいうえお'},
+]
 res_wk = align_lines(official_wk, wh_words_wk)
-eq('align fallback line count', len(res_wk), 2)
+eq('align fallback line count', len(res_wk), 3)
 ok('align fallback weak line projects onto words', ''.join(w['text'] for w in res_wk[0]['words']) == res_wk[0]['text'])
 eq('align fallback weak line time from first word', res_wk[0]['time'], 0.0)
-eq('align fallback exhausted line words empty', res_wk[1]['words'], [])
-eq('align fallback exhausted line time falls back to official', res_wk[1]['time'], 1.5)
-eq('align fallback cover only weak line', sum(len(r['text']) for r in res_wk if r['words']), 5)
+ok('align fallback window line recovers after weak line', ''.join(w['text'] for w in res_wk[1]['words']) == res_wk[1]['text'])
+eq('align fallback window line time', res_wk[1]['time'], 1.15)
+eq('align fallback exhausted line words empty', res_wk[2]['words'], [])
+eq('align fallback exhausted line time falls back to official', res_wk[2]['time'], 5.0)
+eq('align fallback cover weak+window lines only', sum(len(r['text']) for r in res_wk if r['words']), 10)
+
+# ---- align_lines: repeated chorus stays on its own audio span ----
+# 弱行等长消费会吞掉第二遍副歌的开头；时间窗让第二遍副歌独立定位到
+# 自己的音频段，旧顺序算法此处 words=[]（漂移受害者）。
+wh_dup = [
+    {'word': 'さよなら', 'start': 0.0, 'end': 1.0},
+    {'word': 'ららら', 'start': 2.0, 'end': 3.0},
+    {'word': 'また', 'start': 3.0, 'end': 3.5},
+    {'word': 'さよなら', 'start': 4.0, 'end': 5.0},
+]
+official_dup = [
+    {'time': 0.1, 'text': 'さよなら'},
+    {'time': 2.0, 'text': 'ぐるぐるぐる'},
+    {'time': 4.1, 'text': 'さよなら'},
+]
+res_dup = align_lines(official_dup, wh_dup)
+ok('align dup chorus2 lands on second audio span', res_dup[2]['words'] and res_dup[2]['words'][0]['start'] == 4.0)
+eq('align dup chorus2 time from its own first word', res_dup[2]['time'], 3.95)
 
 # ---- align_lines: partially weak match stays exact ----
 wh_words_pw = [

@@ -33,6 +33,10 @@ _LINE_LEAD = 0.05
 # 行匹配弱于该比例（且不足该字符数）时按等长顺序消费兜底——经验值，见 README「已知限制」
 _WEAK_MATCH_RATIO = 0.5
 _MIN_MATCH_CHARS = 3
+# 时间窗对齐：每行按官方 time 在词流开窗独立定位（窗=行区间±缓冲），
+# 重复副歌各行落到各自音频段，不受前序行消费漂移影响；失败才回退顺序消费
+_WINDOW_LOOKBACK = 0.5
+_WINDOW_LOOKAHEAD = 2.0
 
 
 def norm(s):
@@ -54,9 +58,42 @@ def parse_official(lyric_text):
     return official
 
 
+def _project_words(lt, wh_words, w_lo, w_hi):
+    """官方行字符按时间比例投影到 whisper 词 [w_lo, w_hi] → (words, line_time)。
+
+    words 拼接恒等于 lt；line_time = 首词 start - _LINE_LEAD，无词时 None。
+    """
+    base = []
+    for wi in range(w_lo, w_hi + 1):
+        w = wh_words[wi]
+        base.append({'start': round(w['start'], _TIME_PRECISION), 'end': round(w['end'], _TIME_PRECISION)})
+    words = []
+    line_time = None
+    if base:
+        # project official line chars onto word spans by time proportion
+        total = max(0.001, sum(b['end'] - b['start'] for b in base))
+        cum = 0.0
+        cuts = []
+        for b in base:
+            cum += (b['end'] - b['start']) / total
+            cuts.append(int(round(cum * len(lt))))
+        cuts[-1] = len(lt)
+        s = 0
+        for j, b in enumerate(base):
+            e = cuts[j]
+            seg = lt[s:e]
+            s = e
+            if seg:
+                words.append({'text': seg, 'start': b['start'], 'end': b['end']})
+        line_time = words[0]['start'] - _LINE_LEAD if words else None
+    return words, line_time
+
+
 def align_lines(official, wh_words):
     """官方行 × whisper 词 → 逐行 words；拼接文本恒等于官方行文本。
 
+    每行优先在官方 time 的时间窗内独立匹配（见 _WINDOW_* 注释），
+    窗口匹配弱于阈值时回退顺序消费（v0.1.0 行为），保证输出不退化。
     覆盖比例由调用方从 result 推导（有 words 的行字符 / 官方总字符）。
     """
     chars = []
@@ -66,52 +103,74 @@ def align_lines(official, wh_words):
                 chars.append((ch, wi))
     char_stream = ''.join(c for c, _ in chars)
     word_of_char = [wi for _, wi in chars]
+    # 词 wi 在全流中的字符区间 [start, end)，供窗口匹配成功后推进 pos
+    word_char_range = {}
+    cpos = 0
+    for wi, w in enumerate(wh_words):
+        n = sum(1 for ch in w['word'] if not ch.isspace())
+        if n:
+            word_char_range[wi] = (cpos, cpos + n)
+            cpos += n
 
     result = []
     pos = 0
     for idx, line in enumerate(official):
         lt = line['text']
-        sm = SequenceMatcher(None, lt, char_stream[pos:], autojunk=False)
-        block = sm.find_longest_match(0, len(lt), 0, len(char_stream) - pos)
-        size = block.size
-        if size < max(_MIN_MATCH_CHARS, int(len(lt) * _WEAK_MATCH_RATIO)):
-            start_c = pos
-            end_c = min(pos + len(lt), len(char_stream))
-        else:
-            start_c = pos + block.b
-            end_c = start_c + size
+        t = line['time']
+        next_t = official[idx + 1]['time'] if idx + 1 < len(official) else (
+            wh_words[-1]['end'] + _WINDOW_LOOKAHEAD if wh_words else t + 4.0)
 
-        w_lo = word_of_char[start_c] if start_c < len(word_of_char) else len(wh_words)
-        w_hi = word_of_char[min(end_c - 1, len(word_of_char) - 1)] if end_c > 0 and end_c - 1 < len(word_of_char) else w_lo
-        base = []
-        for wi in range(w_lo, w_hi + 1):
-            w = wh_words[wi]
-            base.append({'start': round(w['start'], _TIME_PRECISION), 'end': round(w['end'], _TIME_PRECISION)})
-
-        # 兜底消费把 pos 推到流尾时，后续行的 base 为空——此时不能投影，
-        # 否则 cuts[-1] 在空列表上 IndexError；整首歌的输出会全部丢失。
         words = []
-        line_time = line['time']
-        if base:
-            # project official line chars onto word spans by time proportion
-            total = max(0.001, sum(b['end'] - b['start'] for b in base))
-            cum = 0.0
-            cuts = []
-            for b in base:
-                cum += (b['end'] - b['start']) / total
-                cuts.append(int(round(cum * len(lt))))
-            cuts[-1] = len(lt)
-            s = 0
-            for j, b in enumerate(base):
-                e = cuts[j]
-                seg = lt[s:e]
-                s = e
-                if seg:
-                    words.append({'text': seg, 'start': b['start'], 'end': b['end']})
-            line_time = words[0]['start'] - _LINE_LEAD if words else line['time']
+        line_time = t
+        # 时间窗优先：窗口内词的字符流匹配，成功则独立定位、不推进 pos
+        win_idx = [wi for wi, w in enumerate(wh_words)
+                   if t - _WINDOW_LOOKBACK <= w['start'] < next_t + _WINDOW_LOOKAHEAD]
+        win_chars = []
+        win_of_char = []
+        for wi in win_idx:
+            w = wh_words[wi]
+            for ch in w['word']:
+                if not ch.isspace():
+                    win_chars.append((ch, wi))
+                    win_of_char.append(wi)
+        win_stream = ''.join(c for c, _ in win_chars)
+        matched = False
+        if win_stream:
+            block = SequenceMatcher(None, lt, win_stream, autojunk=False).find_longest_match(
+                0, len(lt), 0, len(win_stream))
+            if block.size >= max(_MIN_MATCH_CHARS, int(len(lt) * _WEAK_MATCH_RATIO)):
+                start_c = block.b
+                end_c = start_c + block.size
+                w_lo = win_of_char[start_c]
+                w_hi = win_of_char[min(end_c - 1, len(win_of_char) - 1)]
+                words, line_time = _project_words(lt, wh_words, w_lo, w_hi)
+                # 同步推进 pos：后续回退行以本行消费的词区间为基准，
+                # 否则回退等长消费会从歌头开始错位（实测 -151.93s 异常）
+                if w_hi in word_char_range:
+                    pos = word_char_range[w_hi][1]
+                matched = True
+
+        if not matched:
+            # 回退顺序消费：弱匹配行按等长推进 pos；pos 推到流尾时 base 为空，
+            # 此时 words=[]、time=官方 time（整首歌输出不因此丢失）
+            sm = SequenceMatcher(None, lt, char_stream[pos:], autojunk=False)
+            block = sm.find_longest_match(0, len(lt), 0, len(char_stream) - pos)
+            size = block.size
+            if size < max(_MIN_MATCH_CHARS, int(len(lt) * _WEAK_MATCH_RATIO)):
+                start_c = pos
+                end_c = min(pos + len(lt), len(char_stream))
+            else:
+                start_c = pos + block.b
+                end_c = start_c + size
+
+            w_lo = word_of_char[start_c] if start_c < len(word_of_char) else len(wh_words)
+            w_hi = word_of_char[min(end_c - 1, len(word_of_char) - 1)] if end_c > 0 and end_c - 1 < len(word_of_char) else w_lo
+            words, projected_time = _project_words(lt, wh_words, w_lo, w_hi)
+            if projected_time is not None:  # base 为空（流耗尽）时保留官方 time，见下方 result.append
+                line_time = projected_time
+            pos = end_c
 
         result.append({'lineIndex': idx, 'time': round(max(0, line_time), _TIME_PRECISION), 'text': lt, 'words': words})
-        pos = end_c
     return result
 
 
