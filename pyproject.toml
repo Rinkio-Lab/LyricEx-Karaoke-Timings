@@ -9,6 +9,7 @@ dependencies = ["faster-whisper"]
 [project.scripts]
 wk-transcribe = "lyricex_karaoke_timings.transcribe:main"
 wk-align = "lyricex_karaoke_timings.align:main"
+wk-preview = "lyricex_karaoke_timings.preview:main"
 
 [build-system]
 requires = ["hatchling"]

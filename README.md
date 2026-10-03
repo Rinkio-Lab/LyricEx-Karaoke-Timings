@@ -17,6 +17,9 @@ whisper.json   { language, duration, segments:[{id,start,end,text,words:[{word,s
     │  wk-align  (SequenceMatcher 字符流对齐 + 时间比例投影)
     ▼
 words.json     [{ lineIndex, time, text, words:[{text,start,end}] }]
+    │  wk-preview  (词级时间可视化校对: HTML 词条条带 + 播放高亮)
+    ▼
+preview.html   浏览器打开, 与音频同目录即可听/看/校对
     │  LyricEx 制包流程 (build-pack.mjs / 软件内导入)
     ▼
 Lemon.lxp.zip  46 行 / 42 行逐字 / 309 词级时间戳
@@ -41,6 +44,10 @@ uv run wk-transcribe lemon-onvocal.mp3 whisper-lemon.json small
 
 # 2) 对齐：词级时间戳 + 网易云原始 JSON（含 lrc.lyric）→ 逐行 words
 uv run wk-align whisper-lemon.json netease-lemon.json lemon-words.json
+
+# 3) 校对：words.json + 音频 → 自包含 HTML（词条条带、点击跳转、播放高亮）
+uv run wk-preview lemon-words.json lemon-onvocal.mp3 preview.html
+#    打开 preview.html（与音频同目录）；不带音频也行：wk-preview lemon-words.json preview.html
 ```
 
 模型：默认 `small`（日语质量/速度均衡，CPU int8 转写 4:34 歌曲约几分钟）；
